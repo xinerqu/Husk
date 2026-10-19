@@ -626,10 +626,27 @@ static EGLint w_eglClientWaitSync(EGLDisplay d, void *s, EGLint f, uint64_t t)
 static EGLBoolean w_eglDestroySync(EGLDisplay d, void *s) { return s ? r_eglDestroySync(d, s) : EGL_FALSE; }
 
 #define ADAPT(name) { #name, (void *)w_##name, (void **)&r_##name }
+/* A filter the driver refuses on a texture it does not support (a 32-bit float texture without linear filtering) is set
+ * to GL_NEAREST for that texture: the engine then has a defined parameter instead of an unset one. */
+extern bool husk_gl_filter_fallback(unsigned target, unsigned pname, int value, unsigned err);
+extern void husk_gl_filter_set_real(void *tex_param_i, void *get_error);
+static void (*r_glTexParameteri)(unsigned, unsigned, int);
+static void w_glTexParameteri(unsigned t, unsigned p, int v)
+{
+    r_glTexParameteri(t, p, v);
+    static unsigned (*get_error)(void);
+    if (!get_error) get_error = (unsigned (*)(void))a_eglGetProcAddress("glGetError");
+    if (!get_error) return;
+    unsigned e = get_error();
+    if (!e) return;
+    husk_gl_filter_set_real((void *)r_glTexParameteri, (void *)get_error);
+    husk_gl_filter_fallback(t, p, v, e);
+}
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
     ADAPT(glBlitFramebuffer), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
     ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
+    ADAPT(glTexParameteri),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
 };
 
