@@ -1,28 +1,26 @@
 /* A texture filter the driver refuses falls back to GL_NEAREST, for that texture only.
  *
- * What was seen. A Godot 4 game on the translation layer draws a scene with some of its content missing -- ground, grass, one
- * sprite -- while the rest of the scene draws and nothing errors: no resource or rendering error in the engine's log, a steady
- * 30 fps, and, with every GL entry point wrapped, one failure in 200,000 glBindTexture calls. That one failure is this:
+ * What this fixes. A GL_RGBA32F (32-bit float) texture asked for GL_TEXTURE_MAG_FILTER = GL_LINEAR is refused by the driver, and
+ * the parameter is then never set. GLES 3.0 does not allow filtering a float texture without OES_texture_float_linear; ANGLE answers
+ * with GL_INVALID_ENUM (strictly INVALID_OPERATION, since GL_LINEAR is a valid enum), so it reads like a bad parameter rather than an
+ * unsupported format. An A15 device shows the same family as "Image format RGBAFloat not supported by hardware, converting to
+ * RGBAHalf".
  *
  *     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR) -> GL_INVALID_ENUM
- *     on texture 708, created as internal=GL_RGBA32F format=GL_RGBA type=GL_FLOAT 64x64
+ *     on a texture created as internal=GL_RGBA32F format=GL_RGBA type=GL_FLOAT
  *
- * Why. GL_RGBA32F is a 32-bit float texture, and GLES 3.0 does not allow filtering one without the driver's
- * OES_texture_float_linear. ANGLE reports the refusal as GL_INVALID_ENUM (strictly INVALID_OPERATION, since GL_LINEAR is a valid
- * enum), so it reads as a bad parameter rather than an unsupported format. Godot then leaves that texture's filter unset, and what
- * the texture draws has an undefined filter. An A15 device shows the same family as "Image format RGBAFloat not supported by
- * hardware, converting to RGBAHalf".
+ * Any Compatibility-renderer project that keeps HDR or light data in float textures asks for this, so it is not one game's problem.
  *
- * It is not one game's problem: any Compatibility-renderer project that keeps HDR or light data in float textures asks for this, and
- * the more of a scene such a texture covers, the more of it can go blank.
+ * What this does not fix, and must not be read as fixing. This was found while investigating a different symptom -- a scene with its
+ * ground, grass and one sprite missing while everything else drew, with no error from the engine and a steady 30 fps. That
+ * investigation wrapped every GL entry point and found the total number of GL failures in the run to be one; a single refused
+ * filter setting on a 64x64 texture in 59,724 texture parameters cannot account for whole layers disappearing. Closing that gap is
+ * separate work. This branch only makes the parameter defined instead of unset.
  *
- * What this does. Only for GL_TEXTURE_MAG_FILTER and GL_TEXTURE_MIN_FILTER, only after the driver refused, and never when the value
+ * What it does. For GL_TEXTURE_MAG_FILTER and GL_TEXTURE_MIN_FILTER only, only after the driver refused, and never when the value
  * asked for is already GL_NEAREST: set the same parameter to GL_NEAREST, the filter every texture can take. A texture that accepts
  * GL_LINEAR is not touched. The wrapper lives in k_adapt, the table eglGetProcAddress consults -- the path a GLES engine actually
  * takes to its GL entry points (glad loads them this way); wrappers registered anywhere else never see the engine's calls.
- *
- * What it does not do. In the run that led here this fired once in 59,724 texture parameters, so it does not account for whole layers
- * disappearing; that is a separate matter. This is the float-texture parameter fix on its own.
  */
 #define _DARWIN_C_SOURCE
 #include <stdbool.h>
